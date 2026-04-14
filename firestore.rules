@@ -1,0 +1,88 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function weddingData(wid) {
+      return get(/databases/$(database)/documents/weddings/$(wid)).data;
+    }
+
+    function isWeddingOwner(wid) {
+      return isSignedIn() && weddingData(wid).created_by == request.auth.uid;
+    }
+
+    function guestLinkEnabled(wid) {
+      return weddingData(wid).visibility == 'guest_link';
+    }
+
+    match /weddings/{weddingId} {
+      allow read: if isWeddingOwner(weddingId) || guestLinkEnabled(weddingId);
+      allow create: if isSignedIn() && request.resource.data.created_by == request.auth.uid;
+      allow update, delete: if isWeddingOwner(weddingId);
+    }
+
+    match /groups/{id} {
+      allow read: if isWeddingOwner(resource.data.wedding_id) || guestLinkEnabled(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+
+    match /families/{id} {
+      allow read: if isWeddingOwner(resource.data.wedding_id) || guestLinkEnabled(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+
+    match /people/{personId} {
+      // Single-doc fetch for guests (no list); owners use list queries.
+      allow get: if isWeddingOwner(resource.data.wedding_id)
+        || guestLinkEnabled(resource.data.wedding_id);
+      allow list: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow create, delete: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update: if isWeddingOwner(resource.data.wedding_id)
+        || (
+          guestLinkEnabled(resource.data.wedding_id)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rsvp_status', 'arrival_date'])
+        );
+    }
+
+    match /timeline_items/{id} {
+      allow read: if isWeddingOwner(resource.data.wedding_id)
+        || (guestLinkEnabled(resource.data.wedding_id) && resource.data.visible_to_guests != false);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+
+    match /assignments/{id} {
+      allow read: if isWeddingOwner(resource.data.wedding_id) || guestLinkEnabled(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+
+    match /announcements/{id} {
+      allow read: if isWeddingOwner(resource.data.wedding_id) || guestLinkEnabled(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow update: if false;
+    }
+
+    match /room_types/{id} {
+      allow read: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update, delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+
+    match /rooms/{id} {
+      allow read: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+      allow create: if isSignedIn() && isWeddingOwner(request.resource.data.wedding_id);
+      allow update, delete: if isSignedIn() && isWeddingOwner(resource.data.wedding_id);
+    }
+  }
+}

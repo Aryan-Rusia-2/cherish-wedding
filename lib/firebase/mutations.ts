@@ -1,0 +1,364 @@
+"use client";
+
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  deleteField,
+  doc,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+} from "firebase/firestore";
+import { getFirebaseDb } from "./config";
+import { col, generateInviteToken, listPeople, listRooms } from "./firestore";
+import type {
+  Assignment,
+  Person,
+  RoomExtraBeds,
+  TimelineItem,
+  WeddingVisibility,
+} from "@/types";
+
+const db = () => getFirebaseDb();
+
+export async function createWedding(input: {
+  name: string;
+  wedding_date: string;
+  created_by: string;
+}): Promise<string> {
+  const ref = await addDoc(collection(db(), col.weddings), {
+    name: input.name,
+    wedding_date: input.wedding_date,
+    created_by: input.created_by,
+    visibility: "private" as WeddingVisibility,
+    created_at: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function updateWeddingVisibility(
+  weddingId: string,
+  visibility: WeddingVisibility,
+) {
+  await updateDoc(doc(db(), col.weddings, weddingId), { visibility });
+}
+
+export async function createGroup(weddingId: string, name: string) {
+  const ref = await addDoc(collection(db(), col.groups), {
+    wedding_id: weddingId,
+    name,
+  });
+  return ref.id;
+}
+
+export async function updateGroup(groupId: string, name: string) {
+  await updateDoc(doc(db(), col.groups, groupId), { name });
+}
+
+export async function deleteGroup(groupId: string) {
+  await deleteDoc(doc(db(), col.groups, groupId));
+}
+
+export async function createFamily(
+  weddingId: string,
+  groupId: string,
+  family_name: string,
+  contact_phone?: string,
+) {
+  const ref = await addDoc(collection(db(), col.families), {
+    wedding_id: weddingId,
+    group_id: groupId,
+    family_name,
+    ...(contact_phone?.trim()
+      ? { contact_phone: contact_phone.trim() }
+      : {}),
+  });
+  return ref.id;
+}
+
+export async function updateFamily(
+  familyId: string,
+  patch: { family_name?: string; contact_phone?: string | null },
+) {
+  const payload: Record<string, unknown> = {};
+  if (patch.family_name !== undefined) {
+    payload.family_name = patch.family_name;
+  }
+  if (patch.contact_phone === null || patch.contact_phone === "") {
+    payload.contact_phone = deleteField();
+  } else if (patch.contact_phone !== undefined) {
+    payload.contact_phone = patch.contact_phone.trim();
+  }
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(db(), col.families, familyId), payload);
+}
+
+export async function deleteFamily(familyId: string) {
+  await deleteDoc(doc(db(), col.families, familyId));
+}
+
+export async function createPerson(
+  input: Omit<Person, "id" | "invite_token" | "phone" | "created_at" | "sort_key">,
+) {
+  const existing = await listPeople(input.wedding_id);
+  let maxSort = -1;
+  for (const p of existing) {
+    if (
+      p.family_id === input.family_id &&
+      typeof p.sort_key === "number" &&
+      Number.isFinite(p.sort_key)
+    ) {
+      maxSort = Math.max(maxSort, p.sort_key);
+    }
+  }
+  const sort_key = maxSort + 1;
+
+  const invite_token = generateInviteToken();
+  const ref = await addDoc(collection(db(), col.people), {
+    wedding_id: input.wedding_id,
+    name: input.name,
+    group_id: input.group_id,
+    family_id: input.family_id,
+    role: input.role,
+    rsvp_status: input.rsvp_status,
+    is_kid: input.is_kid === true,
+    ...(input.arrival_date ? { arrival_date: input.arrival_date } : {}),
+    invite_token,
+    created_at: serverTimestamp(),
+    sort_key,
+  });
+  return { id: ref.id, invite_token } as const;
+}
+
+export async function updatePerson(
+  personId: string,
+  patch: Partial<
+    Pick<
+      Person,
+      | "name"
+      | "rsvp_status"
+      | "is_kid"
+      | "arrival_date"
+      | "role"
+      | "group_id"
+      | "family_id"
+    >
+  >,
+) {
+  await updateDoc(doc(db(), col.people, personId), patch);
+}
+
+export async function deletePerson(personId: string) {
+  await deleteDoc(doc(db(), col.people, personId));
+}
+
+export async function createTimelineItem(
+  input: Omit<TimelineItem, "id">,
+): Promise<string> {
+  const ref = await addDoc(collection(db(), col.timelineItems), input);
+  return ref.id;
+}
+
+export async function updateTimelineItem(
+  itemId: string,
+  patch: Partial<Omit<TimelineItem, "id">>,
+) {
+  await updateDoc(doc(db(), col.timelineItems, itemId), patch);
+}
+
+export async function updateTimelineItemFull(
+  itemId: string,
+  input: {
+    title: string;
+    type: TimelineItem["type"];
+    location?: string;
+    notes?: string;
+    visible_to_guests: boolean;
+    mode: "fixed" | "relative";
+    startLocal?: string;
+    offsetDays?: number;
+  },
+) {
+  const loc = input.location?.trim();
+  const notes = input.notes?.trim();
+  const base = {
+    title: input.title,
+    type: input.type,
+    location: loc ? loc : deleteField(),
+    notes: notes ? notes : deleteField(),
+    visible_to_guests: input.visible_to_guests,
+  };
+  if (input.mode === "fixed") {
+    await updateDoc(doc(db(), col.timelineItems, itemId), {
+      ...base,
+      start_time: input.startLocal
+        ? new Date(input.startLocal).toISOString()
+        : deleteField(),
+      relative_to: deleteField(),
+    });
+  } else {
+    await updateDoc(doc(db(), col.timelineItems, itemId), {
+      ...base,
+      start_time: deleteField(),
+      relative_to: {
+        anchor: "wedding_date" as const,
+        offset_days: input.offsetDays ?? 0,
+      },
+    });
+  }
+}
+
+export async function deleteTimelineItem(itemId: string) {
+  await deleteDoc(doc(db(), col.timelineItems, itemId));
+}
+
+export async function createAssignment(input: Omit<Assignment, "id">) {
+  const ref = await addDoc(collection(db(), col.assignments), input);
+  return ref.id;
+}
+
+export async function deleteAssignment(assignmentId: string) {
+  await deleteDoc(doc(db(), col.assignments, assignmentId));
+}
+
+export async function addAnnouncement(weddingId: string, message: string) {
+  const ref = await addDoc(collection(db(), col.announcements), {
+    wedding_id: weddingId,
+    message,
+    created_at: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+const FIRESTORE_BATCH_MAX = 500;
+
+export async function createRoomType(
+  weddingId: string,
+  name: string,
+  baseOccupancy: number,
+) {
+  const ref = await addDoc(collection(db(), col.roomTypes), {
+    wedding_id: weddingId,
+    name: name.trim(),
+    base_occupancy: Math.max(1, Math.floor(baseOccupancy)),
+  });
+  return ref.id;
+}
+
+export async function updateRoomType(
+  roomTypeId: string,
+  patch: { name?: string; base_occupancy?: number },
+) {
+  const payload: Record<string, unknown> = {};
+  if (patch.name !== undefined) payload.name = patch.name.trim();
+  if (patch.base_occupancy !== undefined) {
+    payload.base_occupancy = Math.max(1, Math.floor(patch.base_occupancy));
+  }
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(db(), col.roomTypes, roomTypeId), payload);
+}
+
+export async function deleteRoomType(weddingId: string, roomTypeId: string) {
+  const [rooms, people] = await Promise.all([
+    listRooms(weddingId),
+    listPeople(weddingId),
+  ]);
+  const typeRooms = rooms.filter((r) => r.room_type_id === roomTypeId);
+  const roomIds = new Set(typeRooms.map((r) => r.id));
+  const occupied = people.filter((p) => p.room_id && roomIds.has(p.room_id));
+  if (occupied.length > 0) {
+    throw new Error(
+      "Cannot delete this room type while guests are assigned to its rooms.",
+    );
+  }
+  for (let i = 0; i < typeRooms.length; i += FIRESTORE_BATCH_MAX) {
+    const batch = writeBatch(db());
+    const slice = typeRooms.slice(i, i + FIRESTORE_BATCH_MAX);
+    for (const r of slice) {
+      batch.delete(doc(db(), col.rooms, r.id));
+    }
+    await batch.commit();
+  }
+  await deleteDoc(doc(db(), col.roomTypes, roomTypeId));
+}
+
+export async function createRoom(
+  weddingId: string,
+  roomTypeId: string,
+  label: string,
+) {
+  const ref = await addDoc(collection(db(), col.rooms), {
+    wedding_id: weddingId,
+    room_type_id: roomTypeId,
+    label: label.trim(),
+    extra_beds: "none" as RoomExtraBeds,
+  });
+  return ref.id;
+}
+
+export async function generateRooms(
+  weddingId: string,
+  roomTypeId: string,
+  count: number,
+  prefix: string,
+  startAt: number,
+) {
+  const total = Math.max(1, Math.floor(count));
+  const start = Math.max(0, Math.floor(startAt));
+  let created = 0;
+  while (created < total) {
+    const batch = writeBatch(db());
+    const chunk = Math.min(FIRESTORE_BATCH_MAX, total - created);
+    for (let i = 0; i < chunk; i++) {
+      const label = `${prefix}${start + created + i}`;
+      const ref = doc(collection(db(), col.rooms));
+      batch.set(ref, {
+        wedding_id: weddingId,
+        room_type_id: roomTypeId,
+        label,
+        extra_beds: "none" as RoomExtraBeds,
+      });
+    }
+    await batch.commit();
+    created += chunk;
+  }
+}
+
+export async function updateRoomExtraBeds(
+  roomId: string,
+  extraBeds: RoomExtraBeds,
+) {
+  await updateDoc(doc(db(), col.rooms, roomId), { extra_beds: extraBeds });
+}
+
+export async function deleteRoom(weddingId: string, roomId: string) {
+  const people = await listPeople(weddingId);
+  const occupied = people.filter((p) => p.room_id === roomId);
+  if (occupied.length > 0) {
+    throw new Error("Remove all guests from this room before deleting it.");
+  }
+  await deleteDoc(doc(db(), col.rooms, roomId));
+}
+
+export async function setPersonRoom(personId: string, roomId: string | null) {
+  await updateDoc(
+    doc(db(), col.people, personId),
+    roomId ? { room_id: roomId } : { room_id: deleteField() },
+  );
+}
+
+export async function allocatePeopleToRoom(
+  personIds: string[],
+  roomId: string,
+) {
+  if (personIds.length === 0) return;
+  for (let i = 0; i < personIds.length; i += FIRESTORE_BATCH_MAX) {
+    const batch = writeBatch(db());
+    const slice = personIds.slice(i, i + FIRESTORE_BATCH_MAX);
+    for (const id of slice) {
+      batch.update(doc(db(), col.people, id), { room_id: roomId });
+    }
+    await batch.commit();
+  }
+}
