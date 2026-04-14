@@ -3,16 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { toast } from "sonner";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { EmptyStateCard } from "@/components/dashboard/empty-state-card";
+import { EntityCard } from "@/components/dashboard/entity-card";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatsRow } from "@/components/dashboard/stats-row";
+import { CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -65,19 +62,6 @@ export default function WeddingGuestsMembersPage() {
     [members],
   );
 
-  const guestLinkBase =
-    typeof window !== "undefined" ? window.location.origin : "";
-
-  async function copyInvite(person: Person) {
-    const url = `${guestLinkBase}/w/${weddingId}/guest/${person.id}`;
-    try {
-      await navigator.clipboard.writeText(url);
-      toast.success("Invite link copied");
-    } catch {
-      toast.error("Could not copy link");
-    }
-  }
-
   if (loading) {
     return (
       <div className="space-y-4">
@@ -103,103 +87,75 @@ export default function WeddingGuestsMembersPage() {
 
   return (
     <div className="space-y-8">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <Link href={`/wedding/${weddingId}/guests`} className="underline">
-          All groups
-        </Link>
-        <span aria-hidden>/</span>
-        <Link
-          href={`/wedding/${weddingId}/guests/${groupId}`}
-          className="underline"
-        >
-          {group.name}
-        </Link>
-        <span aria-hidden>/</span>
-        <span className="font-medium text-foreground">{family.family_name}</span>
-      </nav>
-
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Members</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {family.family_name} · {group.name}
-          </p>
-          {family.contact_phone ? (
-            <p className="mt-1 text-sm text-muted-foreground">
+      <PageHeader
+        breadcrumbs={[
+          { label: "Groups", href: `/wedding/${weddingId}/guests` },
+          { label: group.name, href: `/wedding/${weddingId}/guests/${groupId}` },
+          { label: family.family_name },
+        ]}
+        title={`Members in ${family.family_name}`}
+        description={`${group.name} household`}
+        meta={
+          family.contact_phone ? (
+            <p className="text-sm text-muted-foreground">
               Household contact:{" "}
               <span className="font-medium tabular-nums text-foreground">
                 {family.contact_phone}
               </span>
             </p>
-          ) : null}
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <EditFamilyDialog family={family} onDone={load} />
-          <AddPersonDialog
-            weddingId={weddingId}
-            groupId={groupId}
-            familyId={familyId}
-            onDone={load}
-          />
-        </div>
-      </div>
+          ) : undefined
+        }
+        action={
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+            <EditFamilyDialog family={family} onDone={load} />
+            <AddPersonDialog
+              weddingId={weddingId}
+              groupId={groupId}
+              familyId={familyId}
+              onDone={load}
+            />
+          </div>
+        }
+      />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatCard label="Members" value={members.length} />
-        <StatCard label="Confirmed" value={stats.confirmed} />
-        <StatCard label="Not confirmed" value={stats.pending} />
-      </div>
+      <StatsRow
+        stats={[
+          { label: "Members", value: members.length },
+          { label: "Confirmed", value: stats.confirmed },
+          { label: "Not confirmed", value: stats.pending },
+        ]}
+      />
 
       <div className="space-y-3">
         {membersSorted.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No members yet. Add guests to this family.
-            </CardContent>
-          </Card>
+          <EmptyStateCard
+            title="No members yet"
+            description="Add guests to this family, then mark confirmations when needed."
+          />
         ) : (
           membersSorted.map((p) => (
-            <Card
+            <EntityCard
               key={p.id}
+              title={p.name}
+              description=""
+              action={<PersonActionsMenu person={p} onDone={load} />}
               className={cn(
                 p.rsvp_status === "confirmed" &&
                   "border-emerald-300/70 bg-emerald-50/60 dark:border-emerald-500/50 dark:bg-emerald-950/20",
               )}
-            >
-              <CardHeader className="pb-2">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-lg">{p.name}</CardTitle>
-                      {p.is_kid === true ? <Badge variant="secondary">Kid</Badge> : null}
-                      <RsvpBadge status={p.rsvp_status} />
-                    </div>
-                  </div>
-                  <PersonActionsMenu
-                    person={p}
-                    onDone={load}
-                    onCopyInvite={() => copyInvite(p)}
-                  />
+              footer={
+                <div className="flex flex-wrap items-center gap-2">
+                  {p.is_kid === true ? <Badge variant="secondary">Kid</Badge> : null}
+                  <RsvpBadge status={p.rsvp_status} />
+                  {p.rsvp_status !== "confirmed" ? (
+                    <CardDescription>Not confirmed yet</CardDescription>
+                  ) : null}
                 </div>
-              </CardHeader>
-              <CardContent className="sr-only">Member actions</CardContent>
-            </Card>
+              }
+            />
           ))
         )}
       </div>
     </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardDescription className="text-xs font-medium uppercase tracking-wide">
-          {label}
-        </CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-    </Card>
   );
 }

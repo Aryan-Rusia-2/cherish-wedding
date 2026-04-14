@@ -4,14 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { buttonVariants } from "@/components/ui/button";
+import { EmptyStateCard } from "@/components/dashboard/empty-state-card";
+import { EntityCard } from "@/components/dashboard/entity-card";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatsRow } from "@/components/dashboard/stats-row";
 import { cn } from "@/lib/utils";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AddFamilyDialog,
@@ -94,88 +91,47 @@ export default function WeddingGuestsFamiliesPage() {
 
   return (
     <div className="space-y-8">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <Link href={`/wedding/${weddingId}/guests`} className="underline">
-          All groups
-        </Link>
-        <span aria-hidden>/</span>
-        <span className="font-medium text-foreground">{group.name}</span>
-      </nav>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Groups", href: `/wedding/${weddingId}/guests` },
+          { label: group.name },
+        ]}
+        title={`Families in ${group.name}`}
+        description="Each family is a household. Open one to manage members and attendance."
+        action={<AddFamilyDialog weddingId={weddingId} groupId={groupId} onDone={load} />}
+      />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Families</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Households inside <span className="font-medium">{group.name}</span>
-          </p>
-        </div>
-        <AddFamilyDialog weddingId={weddingId} groupId={groupId} onDone={load} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Families" value={stats.families} />
-        <StatCard label="Guests" value={stats.guests} />
-        <StatCard label="Confirmed" value={stats.rsvp.confirmed} />
-        <StatCard label="Pending" value={stats.rsvp.pending} />
-      </div>
-      <p className="text-sm text-muted-foreground">{formatRsvpSummary(stats.rsvp)}</p>
+      <StatsRow
+        stats={[
+          { label: "Families", value: stats.families },
+          { label: "Guests", value: stats.guests },
+          { label: "Confirmed", value: stats.rsvp.confirmed },
+          { label: "Pending", value: stats.rsvp.pending, helper: formatRsvpSummary(stats.rsvp) },
+        ]}
+      />
 
       <div className="space-y-3">
         {families.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No families in this group yet. Add a family to start adding guests.
-            </CardContent>
-          </Card>
+          <EmptyStateCard
+            title="No families yet"
+            description="Create the first family in this group, then add members inside it."
+          />
         ) : (
           families.map((f) => {
             const members = byFamily.get(f.id) ?? [];
             const rsvp = countByRsvp(members);
             return (
-              <Card key={f.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <Link
-                      href={`/wedding/${weddingId}/guests/${groupId}/${f.id}`}
-                      className="group block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <CardTitle className="text-xl">{f.family_name}</CardTitle>
-                      <CardDescription className="mt-1 text-base transition-colors group-hover:text-foreground">
-                        {members.length} member{members.length === 1 ? "" : "s"}{" "}
-                        · {formatRsvpSummary(rsvp)}
-                        {f.contact_phone ? (
-                          <>
-                            {" "}
-                            ·{" "}
-                            <span className="tabular-nums">
-                              {f.contact_phone}
-                            </span>
-                          </>
-                        ) : null}
-                      </CardDescription>
-                    </Link>
-                    <FamilyActionsMenu family={f} onDone={load} />
-                  </div>
-                </CardHeader>
-                <CardContent className="sr-only">Open family</CardContent>
-              </Card>
+              <EntityCard
+                key={f.id}
+                href={`/wedding/${weddingId}/guests/${groupId}/${f.id}`}
+                title={f.family_name}
+                description={`${members.length} member${members.length === 1 ? "" : "s"} · ${formatRsvpSummary(rsvp)}${f.contact_phone ? ` · ${f.contact_phone}` : ""}`}
+                action={<FamilyActionsMenu family={f} onDone={load} />}
+              />
             );
           })
         )}
       </div>
     </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardDescription className="text-xs font-medium uppercase tracking-wide">
-          {label}
-        </CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-    </Card>
   );
 }

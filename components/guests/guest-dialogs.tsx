@@ -828,11 +828,9 @@ export function DeletePersonButton({
 export function PersonActionsMenu({
   person,
   onDone,
-  onCopyInvite,
 }: {
   person: Person;
   onDone: () => void;
-  onCopyInvite: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(person.name);
@@ -929,7 +927,6 @@ export function PersonActionsMenu({
               ? "Remove confirmation"
               : "Confirm attendance"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={onCopyInvite}>Copy invite link</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setOpen(true)}>Edit</DropdownMenuItem>
           <DropdownMenuItem
             className="text-destructive data-highlighted:bg-destructive/10 data-highlighted:text-destructive"

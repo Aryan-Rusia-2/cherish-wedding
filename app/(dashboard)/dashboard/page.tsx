@@ -17,7 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFirebaseAuth } from "@/lib/firebase/config";
 import { listWeddingsForUser } from "@/lib/firebase/firestore";
-import { createWedding } from "@/lib/firebase/mutations";
+import { createWedding, ensureOwnerWeddingAccess } from "@/lib/firebase/mutations";
 import type { Wedding } from "@/types";
 import { toast } from "sonner";
 
@@ -32,6 +32,17 @@ export default function DashboardPage() {
   async function refresh() {
     if (!user) return;
     const list = await listWeddingsForUser(user.uid);
+    if (user.email) {
+      void Promise.all(
+        list
+          .filter((wedding) => wedding.created_by === user.uid)
+          .map((wedding) =>
+            ensureOwnerWeddingAccess(wedding.id, user.uid, user.email as string),
+          ),
+      ).catch((err: unknown) => {
+        console.warn("Could not backfill owner access records.", err);
+      });
+    }
     setWeddings(list);
   }
 
@@ -63,6 +74,7 @@ export default function DashboardPage() {
           name: name.trim(),
           wedding_date: date,
           created_by: user.uid,
+          created_by_email: user.email ?? undefined,
         }),
         new Promise<never>((_, reject) =>
           setTimeout(

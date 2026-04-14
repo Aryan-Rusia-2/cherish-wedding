@@ -1,16 +1,37 @@
 import type { Timestamp } from "firebase/firestore";
 
-export type WeddingVisibility = "private" | "guest_link";
-
 export interface Wedding {
   id: string;
   name: string;
   wedding_date: string; // ISO date string
   created_by: string;
   slug?: string;
-  /** Defaults to private if missing on older documents */
-  visibility?: WeddingVisibility;
   created_at?: Timestamp;
+}
+
+export type HostRole = "owner" | "collaborator";
+
+export interface WeddingAccess {
+  id: string;
+  wedding_id: string;
+  user_id: string;
+  email: string;
+  role: HostRole;
+  invited_by: string;
+  invite_token?: string;
+  created_at?: Timestamp;
+}
+
+export interface HostInvite {
+  id: string;
+  wedding_id: string;
+  invite_token: string;
+  invited_by: string;
+  used: boolean;
+  used_by?: string;
+  invited_email?: string;
+  created_at?: Timestamp;
+  used_at?: Timestamp;
 }
 
 export interface Group {
@@ -98,9 +119,61 @@ export interface Assignment {
   person_id: string;
 }
 
-export interface Announcement {
+export type EventType = "event" | "ritual" | "task";
+export type EventSide = "bride" | "groom" | "both";
+export type EntityType = "group" | "family" | "person";
+export type ExchangeType = "gift" | "money" | "item";
+export type ExchangeStatus = "planned" | "purchased" | "delivered";
+export type TaskStatus = "pending" | "completed";
+
+export interface WeddingEvent {
   id: string;
   wedding_id: string;
-  message: string;
-  created_at: Timestamp;
+  title: string;
+  type: EventType;
+  side: EventSide;
+  start_time: string;
+  end_time?: string;
+  location?: string;
+  description?: string;
+  image_url?: string;
 }
+
+export interface EventParticipant {
+  id: string;
+  wedding_id: string;
+  event_id: string;
+  entity_type: EntityType;
+  entity_id: string;
+}
+
+export interface Exchange {
+  id: string;
+  wedding_id: string;
+  event_id: string;
+  from_entity_type: EntityType;
+  from_entity_id: string;
+  to_entity_type: EntityType;
+  to_entity_id: string;
+  type: ExchangeType;
+  item_name: string;
+  quantity: number;
+  estimated_value?: number;
+  status: ExchangeStatus;
+  notes?: string;
+}
+
+export interface Task {
+  id: string;
+  wedding_id: string;
+  title: string;
+  deadline: Timestamp | null;
+  status: TaskStatus;
+  notes: string;
+  linked_event_id: string | null;
+  assigned_to: string | null;
+  created_by: string;
+  created_at: Timestamp;
+  updated_at: Timestamp;
+}
+

@@ -1,15 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { EmptyStateCard } from "@/components/dashboard/empty-state-card";
+import { EntityCard } from "@/components/dashboard/entity-card";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatsRow } from "@/components/dashboard/stats-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AddGroupDialog,
@@ -87,36 +83,31 @@ export default function WeddingGuestsGroupsPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            <Link href={`/wedding/${weddingId}`} className="underline">
-              ← Back to overview
-            </Link>
-          </p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">Groups</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Organize by side or circle, then open a group to manage families and
-            guests.
-          </p>
-        </div>
-        <AddGroupDialog weddingId={weddingId} onDone={load} />
-      </div>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Wedding overview", href: `/wedding/${weddingId}` },
+          { label: "Groups" },
+        ]}
+        title="Guest groups"
+        description="Organize by side or circle, then open a group to manage families and members."
+        action={<AddGroupDialog weddingId={weddingId} onDone={load} />}
+      />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Groups" value={stats.groups} />
-        <StatCard label="Families" value={stats.families} />
-        <StatCard label="Guests" value={stats.guests} />
-        <StatCard label="Confirmed" value={stats.rsvpConfirmed} />
-      </div>
+      <StatsRow
+        stats={[
+          { label: "Groups", value: stats.groups },
+          { label: "Families", value: stats.families },
+          { label: "Guests", value: stats.guests },
+          { label: "Confirmed", value: stats.rsvpConfirmed },
+        ]}
+      />
 
       <div className="space-y-3">
         {groups.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No groups yet. Add your first group (e.g. Bride side, Groom side).
-            </CardContent>
-          </Card>
+          <EmptyStateCard
+            title="No groups yet"
+            description="Add your first group (for example Bride side, Groom side, friends, or family circles) to start organizing everyone."
+          />
         ) : (
           groups.map((g) => {
             const s = byGroup.get(g.id) ?? {
@@ -125,44 +116,17 @@ export default function WeddingGuestsGroupsPage() {
               rsvpConfirmed: 0,
             };
             return (
-              <Card key={g.id} className="overflow-hidden">
-                <CardHeader className="pb-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <Link
-                      href={`/wedding/${weddingId}/guests/${g.id}`}
-                      className="group block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <CardTitle className="text-xl">{g.name}</CardTitle>
-                      <CardDescription className="mt-1 text-base transition-colors group-hover:text-foreground">
-                        {s.families} famil{s.families === 1 ? "y" : "ies"} ·{" "}
-                        {s.guests} guest{s.guests === 1 ? "" : "s"}
-                        {s.rsvpConfirmed > 0
-                          ? ` · ${s.rsvpConfirmed} confirmed`
-                          : ""}
-                      </CardDescription>
-                    </Link>
-                    <GroupActionsMenu group={g} onDone={load} />
-                  </div>
-                </CardHeader>
-                <CardContent className="sr-only">Open group</CardContent>
-              </Card>
+              <EntityCard
+                key={g.id}
+                href={`/wedding/${weddingId}/guests/${g.id}`}
+                title={g.name}
+                description={`${s.families} famil${s.families === 1 ? "y" : "ies"} · ${s.guests} guest${s.guests === 1 ? "" : "s"}${s.rsvpConfirmed > 0 ? ` · ${s.rsvpConfirmed} confirmed` : ""}`}
+                action={<GroupActionsMenu group={g} onDone={load} />}
+              />
             );
           })
         )}
       </div>
     </div>
-  );
-}
-
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardDescription className="text-xs font-medium uppercase tracking-wide">
-          {label}
-        </CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-    </Card>
   );
 }

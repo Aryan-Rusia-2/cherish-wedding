@@ -5,6 +5,7 @@ import {
   initializeFirestore,
   type Firestore,
 } from "firebase/firestore";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -43,6 +44,7 @@ function createFirebaseApp(): FirebaseApp {
 let app: FirebaseApp | undefined;
 let auth: Auth | undefined;
 let db: Firestore | undefined;
+let storage: FirebaseStorage | undefined;
 
 export function getFirebaseApp(): FirebaseApp {
   if (!app) app = createFirebaseApp();
@@ -71,4 +73,14 @@ export function getFirebaseDb(): Firestore {
     }
   }
   return db;
+}
+
+export function getFirebaseStorage(): FirebaseStorage {
+  if (typeof window === "undefined") {
+    throw new Error("Firebase Storage must only run in the browser.");
+  }
+  if (!storage) {
+    storage = getStorage(getFirebaseApp());
+  }
+  return storage;
 }

@@ -1,15 +1,27 @@
-import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import { getFirebaseDb } from "./config";
 import type {
-  Announcement,
   Assignment,
+  EventParticipant,
+  Exchange,
   Family,
   Group,
+  HostInvite,
   Person,
   Room,
   RoomType,
+  Task,
   TimelineItem,
   Wedding,
+  WeddingAccess,
+  WeddingEvent,
 } from "@/types";
 
 const db = () => getFirebaseDb();
@@ -21,9 +33,14 @@ export const col = {
   people: "people",
   timelineItems: "timeline_items",
   assignments: "assignments",
-  announcements: "announcements",
   roomTypes: "room_types",
   rooms: "rooms",
+  events: "events",
+  eventParticipants: "event_participants",
+  exchanges: "exchanges",
+  tasks: "tasks",
+  weddingAccess: "wedding_access",
+  hostInvites: "host_invites",
 } as const;
 
 export function weddingRef(id: string) {
@@ -37,24 +54,67 @@ export async function getWedding(id: string): Promise<Wedding | null> {
   return {
     id: snap.id,
     ...data,
-    visibility: data.visibility ?? "private",
   } as Wedding;
 }
 
 export async function listWeddingsForUser(uid: string): Promise<Wedding[]> {
-  const q = query(
+  const ownerQuery = query(
     collection(db(), col.weddings),
     where("created_by", "==", uid),
   );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => {
+  const accessQuery = query(
+    collection(db(), col.weddingAccess),
+    where("user_id", "==", uid),
+  );
+
+  const [ownerSnap, accessSnap] = await Promise.all([
+    getDocs(ownerQuery),
+    getDocs(accessQuery),
+  ]);
+
+  const byId = new Map<string, Wedding>();
+  for (const d of ownerSnap.docs) {
     const data = d.data();
-    return {
+    byId.set(d.id, {
       id: d.id,
       ...data,
-      visibility: data.visibility ?? "private",
-    } as Wedding;
-  });
+    } as Wedding);
+  }
+
+  const accessibleWeddingIds = accessSnap.docs
+    .map((d) => d.data().wedding_id)
+    .filter((value): value is string => typeof value === "string");
+
+  const missingIds = accessibleWeddingIds.filter((id) => !byId.has(id));
+  if (missingIds.length > 0) {
+    const snaps = await Promise.all(missingIds.map((id) => getDoc(weddingRef(id))));
+    for (const snap of snaps) {
+      if (!snap.exists()) continue;
+      byId.set(snap.id, {
+        id: snap.id,
+        ...snap.data(),
+      } as Wedding);
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+export async function listWeddingHosts(
+  weddingId: string,
+): Promise<WeddingAccess[]> {
+  const q = query(
+    collection(db(), col.weddingAccess),
+    where("wedding_id", "==", weddingId),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as WeddingAccess));
+}
+
+export async function getHostInvite(token: string): Promise<HostInvite | null> {
+  const snap = await getDoc(doc(db(), col.hostInvites, token));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as HostInvite;
 }
 
 export async function listGroups(weddingId: string): Promise<Group[]> {
@@ -116,17 +176,73 @@ export async function getPerson(personId: string): Promise<Person | null> {
   return { id: snap.id, ...snap.data() } as Person;
 }
 
-export async function getPersonByInviteToken(
-  token: string,
-): Promise<Person | null> {
+export async function getEvent(eventId: string): Promise<WeddingEvent | null> {
+  const snap = await getDoc(doc(db(), col.events, eventId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as WeddingEvent;
+}
+
+export async function listEvents(weddingId: string): Promise<WeddingEvent[]> {
   const q = query(
-    collection(db(), col.people),
-    where("invite_token", "==", token),
+    collection(db(), col.events),
+    where("wedding_id", "==", weddingId),
   );
   const snap = await getDocs(q);
-  if (snap.empty) return null;
-  const d = snap.docs[0]!;
-  return { id: d.id, ...d.data() } as Person;
+  const items = snap.docs.map(
+    (d) => ({ id: d.id, ...d.data() } as WeddingEvent),
+  );
+  return items.sort((a, b) => a.start_time.localeCompare(b.start_time));
+}
+
+export async function listEventParticipants(
+  weddingId: string,
+  eventId: string,
+): Promise<EventParticipant[]> {
+  const q = query(
+    collection(db(), col.eventParticipants),
+    where("wedding_id", "==", weddingId),
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as EventParticipant))
+    .filter((item) => item.event_id === eventId);
+}
+
+export async function listExchanges(weddingId: string): Promise<Exchange[]> {
+  const q = query(
+    collection(db(), col.exchanges),
+    where("wedding_id", "==", weddingId),
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Exchange));
+}
+
+export async function listExchangesForEvent(
+  weddingId: string,
+  eventId: string,
+): Promise<Exchange[]> {
+  const items = await listExchanges(weddingId);
+  return items.filter((item) => item.event_id === eventId);
+}
+
+export async function getTask(taskId: string): Promise<Task | null> {
+  const snap = await getDoc(doc(db(), col.tasks, taskId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Task;
+}
+
+export async function listTasks(weddingId: string): Promise<Task[]> {
+  const q = query(
+    collection(db(), col.tasks),
+    where("wedding_id", "==", weddingId),
+  );
+  const snap = await getDocs(q);
+  const tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Task));
+  return tasks.sort((a, b) => {
+    const aTime = taskDeadlineSortValue(a);
+    const bTime = taskDeadlineSortValue(b);
+    return aTime - bTime;
+  });
 }
 
 export async function listTimelineItems(
@@ -152,6 +268,13 @@ function resolveSortTime(item: TimelineItem): string {
   return item.relative_to ? `rel:${item.relative_to.offset_days}` : "";
 }
 
+function taskDeadlineSortValue(task: Task): number {
+  if (!task.deadline) return Number.POSITIVE_INFINITY;
+  const millis = task.deadline.toMillis();
+  if (!Number.isFinite(millis)) return Number.POSITIVE_INFINITY;
+  return millis;
+}
+
 export async function listAssignmentsForWedding(
   weddingId: string,
 ): Promise<Assignment[]> {
@@ -161,35 +284,6 @@ export async function listAssignmentsForWedding(
   );
   const snap = await getDocs(q);
   return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Assignment));
-}
-
-export async function listAssignmentsForPerson(
-  personId: string,
-): Promise<Assignment[]> {
-  const q = query(
-    collection(db(), col.assignments),
-    where("person_id", "==", personId),
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Assignment));
-}
-
-export async function listAnnouncements(
-  weddingId: string,
-): Promise<Announcement[]> {
-  // Single-field query only — avoids long client timeouts when the composite
-  // index (wedding_id + created_at) is missing. Sort in memory instead.
-  const q = query(
-    collection(db(), col.announcements),
-    where("wedding_id", "==", weddingId),
-  );
-  const snap = await getDocs(q);
-  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Announcement));
-  return list.sort((a, b) => {
-    const ca = a.created_at?.toMillis?.() ?? 0;
-    const cb = b.created_at?.toMillis?.() ?? 0;
-    return cb - ca;
-  });
 }
 
 /** Random invite token for guest URLs */

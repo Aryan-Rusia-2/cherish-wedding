@@ -6,18 +6,34 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   serverTimestamp,
+  setDoc,
+  Timestamp,
   updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { getFirebaseDb } from "./config";
-import { col, generateInviteToken, listPeople, listRooms } from "./firestore";
+import {
+  col,
+  generateInviteToken,
+  listEventParticipants,
+  listExchangesForEvent,
+  listPeople,
+  listRooms,
+} from "./firestore";
 import type {
   Assignment,
+  EventParticipant,
+  Exchange,
+  ExchangeStatus,
+  HostRole,
   Person,
   RoomExtraBeds,
+  TaskStatus,
   TimelineItem,
-  WeddingVisibility,
+  WeddingEvent,
+  WeddingAccess,
 } from "@/types";
 
 const db = () => getFirebaseDb();
@@ -26,22 +42,133 @@ export async function createWedding(input: {
   name: string;
   wedding_date: string;
   created_by: string;
+  created_by_email?: string;
 }): Promise<string> {
   const ref = await addDoc(collection(db(), col.weddings), {
     name: input.name,
     wedding_date: input.wedding_date,
     created_by: input.created_by,
-    visibility: "private" as WeddingVisibility,
     created_at: serverTimestamp(),
   });
+  if (input.created_by_email?.trim()) {
+    await ensureOwnerWeddingAccess(
+      ref.id,
+      input.created_by,
+      input.created_by_email.trim(),
+    );
+  }
   return ref.id;
 }
 
-export async function updateWeddingVisibility(
+async function getWeddingAccessRecord(
   weddingId: string,
-  visibility: WeddingVisibility,
-) {
-  await updateDoc(doc(db(), col.weddings, weddingId), { visibility });
+  userId: string,
+): Promise<WeddingAccess | null> {
+  const accessId = `${weddingId}_${userId}`;
+  const snap = await getDoc(doc(db(), col.weddingAccess, accessId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as WeddingAccess;
+}
+
+export async function createWeddingAccess(input: {
+  wedding_id: string;
+  user_id: string;
+  email: string;
+  role: HostRole;
+  invited_by: string;
+  invite_token?: string;
+}): Promise<string> {
+  const accessId = `${input.wedding_id}_${input.user_id}`;
+  const existing = await getWeddingAccessRecord(input.wedding_id, input.user_id);
+  if (existing) return existing.id;
+  await setDoc(doc(db(), col.weddingAccess, accessId), {
+    wedding_id: input.wedding_id,
+    user_id: input.user_id,
+    email: input.email,
+    role: input.role,
+    invited_by: input.invited_by,
+    ...(input.invite_token ? { invite_token: input.invite_token } : {}),
+    created_at: serverTimestamp(),
+  });
+  return accessId;
+}
+
+export async function ensureOwnerWeddingAccess(
+  weddingId: string,
+  userId: string,
+  email: string,
+): Promise<string> {
+  return createWeddingAccess({
+    wedding_id: weddingId,
+    user_id: userId,
+    email,
+    role: "owner",
+    invited_by: userId,
+  });
+}
+
+export async function createHostInvite(input: {
+  wedding_id: string;
+  invited_by: string;
+  invited_email?: string;
+}): Promise<{ id: string; invite_token: string }> {
+  const invite_token = generateInviteToken();
+  await setDoc(doc(db(), col.hostInvites, invite_token), {
+    wedding_id: input.wedding_id,
+    invite_token,
+    invited_by: input.invited_by,
+    invited_email: input.invited_email?.trim() || null,
+    used: false,
+    created_at: serverTimestamp(),
+  });
+  return { id: invite_token, invite_token };
+}
+
+export async function acceptHostInvite(input: {
+  invite_token: string;
+  user_id: string;
+  email: string;
+}): Promise<{ wedding_id: string }> {
+  const inviteDoc = await getDoc(doc(db(), col.hostInvites, input.invite_token));
+  if (!inviteDoc.exists()) {
+    throw new Error("Invite not found or expired.");
+  }
+
+  const inviteData = inviteDoc.data();
+  const wedding_id = inviteData.wedding_id as string;
+  const invited_email = (inviteData.invited_email as string | null | undefined) ?? "";
+  const used = inviteData.used === true;
+  const used_by = (inviteData.used_by as string | undefined) ?? "";
+
+  if (
+    invited_email &&
+    input.email &&
+    invited_email.toLowerCase() !== input.email.toLowerCase()
+  ) {
+    throw new Error("This invite is tied to a different email address.");
+  }
+  if (used && used_by && used_by !== input.user_id) {
+    throw new Error("This invite has already been used.");
+  }
+
+  await createWeddingAccess({
+    wedding_id,
+    user_id: input.user_id,
+    email: input.email,
+    role: "collaborator",
+    invited_by: (inviteData.invited_by as string) || input.user_id,
+    invite_token: input.invite_token,
+  });
+
+  if (!used) {
+    await updateDoc(inviteDoc.ref, {
+      used: true,
+      used_by: input.user_id,
+      used_at: serverTimestamp(),
+    });
+  }
+
+  return { wedding_id };
 }
 
 export async function createGroup(weddingId: string, name: string) {
@@ -222,16 +349,223 @@ export async function deleteAssignment(assignmentId: string) {
   await deleteDoc(doc(db(), col.assignments, assignmentId));
 }
 
-export async function addAnnouncement(weddingId: string, message: string) {
-  const ref = await addDoc(collection(db(), col.announcements), {
-    wedding_id: weddingId,
-    message,
-    created_at: serverTimestamp(),
+export async function createEvent(
+  input: Omit<WeddingEvent, "id">,
+): Promise<string> {
+  const ref = await addDoc(collection(db(), col.events), {
+    wedding_id: input.wedding_id,
+    title: input.title.trim(),
+    type: input.type,
+    side: input.side,
+    start_time: input.start_time,
+    ...(input.end_time ? { end_time: input.end_time } : {}),
+    ...(input.location?.trim() ? { location: input.location.trim() } : {}),
+    ...(input.description?.trim()
+      ? { description: input.description.trim() }
+      : {}),
+    ...(input.image_url?.trim() ? { image_url: input.image_url.trim() } : {}),
   });
   return ref.id;
 }
 
+export async function updateEvent(
+  eventId: string,
+  patch: Partial<Omit<WeddingEvent, "id" | "wedding_id">>,
+) {
+  const payload: Record<string, unknown> = {};
+  if (patch.title !== undefined) payload.title = patch.title.trim();
+  if (patch.type !== undefined) payload.type = patch.type;
+  if (patch.side !== undefined) payload.side = patch.side;
+  if (patch.start_time !== undefined) payload.start_time = patch.start_time;
+  if (patch.end_time !== undefined) {
+    payload.end_time = patch.end_time ? patch.end_time : deleteField();
+  }
+  if (patch.location !== undefined) {
+    const location = patch.location.trim();
+    payload.location = location ? location : deleteField();
+  }
+  if (patch.description !== undefined) {
+    const description = patch.description.trim();
+    payload.description = description ? description : deleteField();
+  }
+  if (patch.image_url !== undefined) {
+    const imageUrl = patch.image_url.trim();
+    payload.image_url = imageUrl ? imageUrl : deleteField();
+  }
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(db(), col.events, eventId), payload);
+}
+
+export async function deleteEvent(weddingId: string, eventId: string) {
+  const [participants, exchanges] = await Promise.all([
+    listEventParticipants(weddingId, eventId),
+    listExchangesForEvent(weddingId, eventId),
+  ]);
+
+  const linkedIds = [
+    ...participants.map((item) => ({ collection: col.eventParticipants, id: item.id })),
+    ...exchanges.map((item) => ({ collection: col.exchanges, id: item.id })),
+  ];
+
+  for (let i = 0; i < linkedIds.length; i += FIRESTORE_BATCH_MAX) {
+    const batch = writeBatch(db());
+    const slice = linkedIds.slice(i, i + FIRESTORE_BATCH_MAX);
+    for (const item of slice) {
+      batch.delete(doc(db(), item.collection, item.id));
+    }
+    await batch.commit();
+  }
+
+  await deleteDoc(doc(db(), col.events, eventId));
+}
+
+export async function addEventParticipant(
+  input: Omit<EventParticipant, "id">,
+): Promise<string> {
+  const ref = await addDoc(collection(db(), col.eventParticipants), input);
+  return ref.id;
+}
+
+export async function removeEventParticipant(participantId: string) {
+  await deleteDoc(doc(db(), col.eventParticipants, participantId));
+}
+
+export async function createExchange(
+  input: Omit<Exchange, "id">,
+): Promise<string> {
+  const ref = await addDoc(collection(db(), col.exchanges), {
+    wedding_id: input.wedding_id,
+    event_id: input.event_id,
+    from_entity_type: input.from_entity_type,
+    from_entity_id: input.from_entity_id,
+    to_entity_type: input.to_entity_type,
+    to_entity_id: input.to_entity_id,
+    type: input.type,
+    item_name: input.item_name.trim(),
+    quantity: Math.max(1, Math.floor(input.quantity)),
+    ...(typeof input.estimated_value === "number" && Number.isFinite(input.estimated_value)
+      ? { estimated_value: input.estimated_value }
+      : {}),
+    status: input.status,
+    ...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
+  });
+  return ref.id;
+}
+
+export async function updateExchange(
+  exchangeId: string,
+  patch: Partial<Omit<Exchange, "id" | "wedding_id" | "event_id">>,
+) {
+  const payload: Record<string, unknown> = {};
+  if (patch.from_entity_type !== undefined) {
+    payload.from_entity_type = patch.from_entity_type;
+  }
+  if (patch.from_entity_id !== undefined) payload.from_entity_id = patch.from_entity_id;
+  if (patch.to_entity_type !== undefined) payload.to_entity_type = patch.to_entity_type;
+  if (patch.to_entity_id !== undefined) payload.to_entity_id = patch.to_entity_id;
+  if (patch.type !== undefined) payload.type = patch.type;
+  if (patch.item_name !== undefined) payload.item_name = patch.item_name.trim();
+  if (patch.quantity !== undefined) {
+    payload.quantity = Math.max(1, Math.floor(patch.quantity));
+  }
+  if (patch.estimated_value !== undefined) {
+    payload.estimated_value =
+      typeof patch.estimated_value === "number" && Number.isFinite(patch.estimated_value)
+        ? patch.estimated_value
+        : deleteField();
+  }
+  if (patch.status !== undefined) payload.status = patch.status;
+  if (patch.notes !== undefined) {
+    const notes = patch.notes.trim();
+    payload.notes = notes ? notes : deleteField();
+  }
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(db(), col.exchanges, exchangeId), payload);
+}
+
+export async function updateExchangeStatus(
+  exchangeId: string,
+  status: ExchangeStatus,
+) {
+  await updateDoc(doc(db(), col.exchanges, exchangeId), { status });
+}
+
+export async function deleteExchange(exchangeId: string) {
+  await deleteDoc(doc(db(), col.exchanges, exchangeId));
+}
+
 const FIRESTORE_BATCH_MAX = 500;
+
+type TaskMutationInput = {
+  title: string;
+  deadline?: Date | null;
+  notes?: string;
+  linked_event_id?: string | null;
+  assigned_to?: string | null;
+};
+
+export async function createTask(
+  weddingId: string,
+  data: TaskMutationInput,
+  userId: string,
+): Promise<string> {
+  const title = data.title.trim();
+  if (!title) {
+    throw new Error("Task title is required.");
+  }
+  const ref = await addDoc(collection(db(), col.tasks), {
+    wedding_id: weddingId,
+    title,
+    deadline: data.deadline ? Timestamp.fromDate(data.deadline) : null,
+    status: "pending" as TaskStatus,
+    notes: data.notes?.trim() ?? "",
+    linked_event_id: data.linked_event_id ?? null,
+    assigned_to: data.assigned_to ?? null,
+    created_by: userId,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
+  });
+  return ref.id;
+}
+
+export async function updateTask(
+  taskId: string,
+  patch: Partial<TaskMutationInput & { status: TaskStatus }>,
+) {
+  const payload: Record<string, unknown> = {
+    updated_at: serverTimestamp(),
+  };
+  if (patch.title !== undefined) {
+    payload.title = patch.title.trim();
+  }
+  if (patch.deadline !== undefined) {
+    payload.deadline = patch.deadline ? Timestamp.fromDate(patch.deadline) : null;
+  }
+  if (patch.status !== undefined) {
+    payload.status = patch.status;
+  }
+  if (patch.notes !== undefined) {
+    payload.notes = patch.notes.trim();
+  }
+  if (patch.linked_event_id !== undefined) {
+    payload.linked_event_id = patch.linked_event_id || null;
+  }
+  if (patch.assigned_to !== undefined) {
+    payload.assigned_to = patch.assigned_to || null;
+  }
+  await updateDoc(doc(db(), col.tasks, taskId), payload);
+}
+
+export async function deleteTask(taskId: string) {
+  await deleteDoc(doc(db(), col.tasks, taskId));
+}
+
+export async function setTaskStatus(taskId: string, status: TaskStatus) {
+  await updateDoc(doc(db(), col.tasks, taskId), {
+    status,
+    updated_at: serverTimestamp(),
+  });
+}
 
 export async function createRoomType(
   weddingId: string,

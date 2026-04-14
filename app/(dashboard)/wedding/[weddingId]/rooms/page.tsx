@@ -1,17 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { EmptyStateCard } from "@/components/dashboard/empty-state-card";
+import { EntityCard } from "@/components/dashboard/entity-card";
+import { PageHeader } from "@/components/dashboard/page-header";
+import { StatsRow } from "@/components/dashboard/stats-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AddRoomTypeDialog,
@@ -90,43 +84,31 @@ export default function WeddingRoomsPage() {
 
   return (
     <div className="space-y-8">
-      <nav className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-        <Link href={`/wedding/${weddingId}`} className="underline">
-          Wedding overview
-        </Link>
-        <span aria-hidden>/</span>
-        <span className="font-medium text-foreground">Rooms</span>
-      </nav>
+      <PageHeader
+        breadcrumbs={[
+          { label: "Wedding overview", href: `/wedding/${weddingId}` },
+          { label: "Rooms" },
+        ]}
+        title="Room planning"
+        description="Define room types, inventory, and open each type to allocate guests."
+        action={<AddRoomTypeDialog weddingId={weddingId} onDone={load} />}
+      />
 
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Rooms</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Define room types and inventory, then allocate guests on each type’s
-            page.
-          </p>
-        </div>
-        <AddRoomTypeDialog weddingId={weddingId} onDone={load} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Types" value={stats.types} />
-        <Stat label="Rooms" value={stats.rooms} />
-        <Stat label="Bed capacity" value={stats.totalCap} />
-        <Stat label="Assigned guests" value={stats.allocated} />
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Available slots: {stats.available} (capacity minus assigned guests)
-      </p>
+      <StatsRow
+        stats={[
+          { label: "Types", value: stats.types },
+          { label: "Rooms", value: stats.rooms },
+          { label: "Bed capacity", value: stats.totalCap },
+          { label: "Assigned", value: stats.allocated, helper: `${stats.available} available` },
+        ]}
+      />
 
       <div className="space-y-3">
         {roomTypes.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No room types yet. Add one (e.g. Deluxe) with a base occupancy, then
-              open it to generate numbered rooms and assign guests.
-            </CardContent>
-          </Card>
+          <EmptyStateCard
+            title="No room types yet"
+            description="Add a room type (for example Deluxe), then open it to generate rooms and allocate guests."
+          />
         ) : (
           roomTypes.map((t) => {
             const typeRooms = byType.get(t.id) ?? [];
@@ -141,59 +123,23 @@ export default function WeddingRoomsPage() {
               );
             }, 0);
             return (
-              <Card key={t.id}>
-                <CardHeader className="pb-3">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <CardTitle className="text-xl">{t.name}</CardTitle>
-                      <CardDescription className="mt-1 text-base">
-                        Base occupancy {t.base_occupancy} · {typeRooms.length}{" "}
-                        room{typeRooms.length === 1 ? "" : "s"} · {assigned}{" "}
-                        guest{assigned === 1 ? "" : "s"} assigned
-                        {cap > 0 ? (
-                          <>
-                            {" "}
-                            · capacity {cap}
-                          </>
-                        ) : null}
-                      </CardDescription>
-                    </div>
-                    <RoomTypeActionsMenu
-                      weddingId={weddingId}
-                      roomType={t}
-                      onDone={load}
-                    />
-                  </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <Link
-                    href={`/wedding/${weddingId}/rooms/${t.id}`}
-                    className={cn(
-                      buttonVariants({ variant: "secondary", size: "default" }),
-                      "inline-flex min-h-12 w-full items-center justify-center text-base",
-                    )}
-                  >
-                    Manage rooms & allocation →
-                  </Link>
-                </CardContent>
-              </Card>
+              <EntityCard
+                key={t.id}
+                href={`/wedding/${weddingId}/rooms/${t.id}`}
+                title={t.name}
+                description={`Base occupancy ${t.base_occupancy} · ${typeRooms.length} room${typeRooms.length === 1 ? "" : "s"} · ${assigned} assigned${cap > 0 ? ` · capacity ${cap}` : ""}`}
+                action={
+                  <RoomTypeActionsMenu
+                    weddingId={weddingId}
+                    roomType={t}
+                    onDone={load}
+                  />
+                }
+              />
             );
           })
         )}
       </div>
     </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <Card>
-      <CardHeader className="p-4 pb-2">
-        <CardDescription className="text-xs font-medium uppercase tracking-wide">
-          {label}
-        </CardDescription>
-        <CardTitle className="text-2xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-    </Card>
   );
 }

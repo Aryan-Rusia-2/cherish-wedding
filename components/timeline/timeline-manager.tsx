@@ -162,14 +162,9 @@ export function TimelineManager({ weddingId, weddingDateIso }: Props) {
                 </div>
               </div>
             </CardHeader>
-            {(item.notes || item.visible_to_guests !== false) && (
+            {item.notes && (
               <CardContent className="space-y-2 text-sm">
-                {item.visible_to_guests && (
-                  <p className="text-muted-foreground">Visible on guest schedule</p>
-                )}
-                {item.notes && (
-                  <p className="whitespace-pre-wrap leading-relaxed">{item.notes}</p>
-                )}
+                <p className="whitespace-pre-wrap leading-relaxed">{item.notes}</p>
               </CardContent>
             )}
           </Card>
@@ -198,7 +193,6 @@ function AddTimelineDialog({
   const [offsetDays, setOffsetDays] = useState(-2);
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
-  const [visible, setVisible] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -211,7 +205,7 @@ function AddTimelineDialog({
         type,
         location: location.trim() || undefined,
         notes: notes.trim() || undefined,
-        visible_to_guests: visible,
+        visible_to_guests: true,
         start_time:
           mode === "fixed" && startLocal
             ? new Date(startLocal).toISOString()
@@ -232,7 +226,6 @@ function AddTimelineDialog({
       setStartLocal("");
       setLocation("");
       setNotes("");
-      setVisible(true);
       setMode("fixed");
       setOffsetDays(-2);
       setType("event");
@@ -350,16 +343,6 @@ function AddTimelineDialog({
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
-          <div className="flex items-center gap-3 rounded-lg border p-3">
-            <Checkbox
-              id="tvis"
-              checked={visible}
-              onCheckedChange={(c) => setVisible(c === true)}
-            />
-            <Label htmlFor="tvis" className="text-sm font-normal leading-snug">
-              Show on guest schedule (only when guest links are enabled)
-            </Label>
-          </div>
           <DialogFooter>
             <Button type="submit" disabled={busy} className="min-h-11 w-full">
               {busy ? "Saving…" : "Save"}
@@ -399,7 +382,6 @@ function EditTimelineDialog({
   );
   const [location, setLocation] = useState(item.location ?? "");
   const [notes, setNotes] = useState(item.notes ?? "");
-  const [visible, setVisible] = useState(item.visible_to_guests !== false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -411,7 +393,6 @@ function EditTimelineDialog({
     setOffsetDays(item.relative_to?.offset_days ?? -2);
     setLocation(item.location ?? "");
     setNotes(item.notes ?? "");
-    setVisible(item.visible_to_guests !== false);
   }, [open, item]);
 
   async function submit(e: React.FormEvent) {
@@ -423,7 +404,7 @@ function EditTimelineDialog({
         type,
         location: location.trim() || undefined,
         notes: notes.trim() || undefined,
-        visible_to_guests: visible,
+        visible_to_guests: true,
         mode,
         startLocal: mode === "fixed" ? startLocal : undefined,
         offsetDays: mode === "relative" ? offsetDays : undefined,
@@ -541,16 +522,6 @@ function EditTimelineDialog({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-          </div>
-          <div className="flex items-center gap-3 rounded-lg border p-3">
-            <Checkbox
-              id="evis"
-              checked={visible}
-              onCheckedChange={(c) => setVisible(c === true)}
-            />
-            <Label htmlFor="evis" className="text-sm font-normal leading-snug">
-              Visible on guest schedule
-            </Label>
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy} className="min-h-11 w-full">
